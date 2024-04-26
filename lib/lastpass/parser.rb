@@ -3,6 +3,8 @@
 
 module LastPass
     class Parser
+        ASN1_SEQUENCE = %i[n e d p q dp dq qi].freeze
+
         # OpenSSL constant
         RSA_PKCS1_OAEP_PADDING = 4
 
@@ -99,32 +101,29 @@ module LastPass
             asn1_encoded_all = OpenSSL::ASN1.decode decode_hex hex_key
             asn1_encoded_key = OpenSSL::ASN1.decode asn1_encoded_all.value[2].value
 
-            rsa_key = OpenSSL::PKey::RSA.new
-            n = asn1_encoded_key.value[1].value
-            e = asn1_encoded_key.value[2].value
-            d = asn1_encoded_key.value[3].value
-            p = asn1_encoded_key.value[4].value
-            q = asn1_encoded_key.value[5].value
-            dmp1 = asn1_encoded_key.value[6].value
-            dmq1 = asn1_encoded_key.value[7].value
-            iqmp = asn1_encoded_key.value[8].value
+            rsa_parameters = {
+              n: asn1_encoded_key.value[1].value,
+              e: asn1_encoded_key.value[2].value,
+              d: asn1_encoded_key.value[3].value,
+              p: asn1_encoded_key.value[4].value,
+              q: asn1_encoded_key.value[5].value,
+              dp: asn1_encoded_key.value[6].value,
+              dq: asn1_encoded_key.value[7].value,
+              qi: asn1_encoded_key.value[8].value
+            }
 
-            if rsa_key.respond_to? :set_key
-                rsa_key.set_key n, e, d
-                rsa_key.set_factors p, q
-                rsa_key.set_crt_params dmp1, dmq1, iqmp
-            else
-                rsa_key.n = n
-                rsa_key.e = e
-                rsa_key.d = d
-                rsa_key.p = p
-                rsa_key.q = q
-                rsa_key.dmp1 = dmp1
-                rsa_key.dmq1 = dmq1
-                rsa_key.iqmp = iqmp
+            sequence = ASN1_SEQUENCE.each_with_object([]) do |key, arr|
+                next if rsa_parameters[key].nil?
+
+                arr << OpenSSL::ASN1::Integer.new(rsa_parameters[key])
             end
 
-            rsa_key
+            # For a private key.
+            if sequence.size > 2
+                sequence.unshift(OpenSSL::ASN1::Integer.new(0))
+            end
+
+            return OpenSSL::PKey::RSA.new(OpenSSL::ASN1::Sequence(sequence).to_der)
         end
 
         def self.parse_secure_note_server notes
